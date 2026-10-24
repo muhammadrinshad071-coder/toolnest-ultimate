@@ -52,10 +52,38 @@ function setMenu(open) {
 }
 
 /* ---------- Lazy dialogs ---------- */
+let palettePromise = null;
+const loadPalette = () => (palettePromise ??= import('./ui/palette.js'));
+
+/**
+ * The palette loads on first use. Keys typed while it downloads would
+ * otherwise go nowhere, so they are collected and handed to the search box.
+ */
 async function openPalette(initial = '') {
-  const { openPalette: open } = await import('./ui/palette.js');
-  open(initial);
+  let typed = initial;
+  const collect = (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key.length === 1) typed += e.key;
+    else if (e.key === 'Backspace') typed = typed.slice(0, -1);
+    else return;
+    e.preventDefault();
+  };
+  document.addEventListener('keydown', collect, true);
+  try {
+    const { openPalette: open } = await loadPalette();
+    open(typed);
+  } catch {
+    palettePromise = null; // allow a retry, for example after reconnecting
+    toast('Search could not load. Check your connection and try again.', { type: 'error' });
+  } finally {
+    document.removeEventListener('keydown', collect, true);
+  }
 }
+
+// Fetch the palette once the page is idle, so the first Ctrl+K opens instantly.
+const preloadPalette = () => loadPalette().catch(() => { palettePromise = null; });
+if ('requestIdleCallback' in window) window.requestIdleCallback(preloadPalette, { timeout: 4000 });
+else setTimeout(preloadPalette, 2000);
 
 async function openSettings() {
   const { openSettings: open } = await import('./ui/settings.js');
